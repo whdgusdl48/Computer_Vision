@@ -52,7 +52,7 @@ def image_loader_celeba(path,image_size):
         data_img = cv2.imread(img_path + "/" + img_list[number])
         data_img = cv2.cvtColor(data_img,cv2.COLOR_BGR2RGB)
         data_img = np.array(data_img)
-        data_img = cv2.resize(data_img,(128,128),interpolation = cv2.INTER_CUBIC)
+        data_img = cv2.resize(data_img,image_size,interpolation = cv2.INTER_CUBIC)
         data.append(data_img)
     
     data = np.array(data)
@@ -60,8 +60,8 @@ def image_loader_celeba(path,image_size):
     return data
 
 def image_processing(dataset):
-    data = np.array(dataset).astype(np.float32)
-    data = (data / 127.5) - 1
+    data = tf.cast(dataset,tf.float32)
+    data = (data/255)
     return data
 
 def split_data(dataset,test_size):
