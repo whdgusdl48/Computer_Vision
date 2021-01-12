@@ -37,15 +37,15 @@ y_test = to_categorical(y_test, NUM_CLASSES)
 
 print(x_train.shape)
 
-def AE(input_shape=(28,28,1)):
+def AE(input_shape=(28, 28, 1)):
     input_layer = Input(shape=input_shape)
-    encoder_layer1 = Conv2D(filters=32,kernel_size=3, strides=1,padding='same')(input_layer)
+    encoder_layer1 = Conv2D(filters=32, kernel_size=3, strides=1,padding='same')(input_layer)
     activation1 = LeakyReLU()(encoder_layer1)
-    encoder_layer2 = Conv2D(filters=64,kernel_size=3, strides=2,padding='same')(activation1)
+    encoder_layer2 = Conv2D(filters=64, kernel_size=3, strides=2,padding='same')(activation1)
     activation2 = LeakyReLU()(encoder_layer2)
-    encoder_layer3 = Conv2D(filters=64,kernel_size=3, strides=2,padding='same')(activation2)
+    encoder_layer3 = Conv2D(filters=64, kernel_size=3, strides=2,padding='same')(activation2)
     activation3 = LeakyReLU()(encoder_layer3)
-    encoder_layer4 = Conv2D(filters=64,kernel_size=3, strides=1,padding='same')(activation3)
+    encoder_layer4 = Conv2D(filters=64, kernel_size=3, strides=1,padding='same')(activation3)
     activation4 = LeakyReLU()(encoder_layer4)
     before_number = K.int_shape(activation4)[1:]
     flatten = Flatten()(activation4)
