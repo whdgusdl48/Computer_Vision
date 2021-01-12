@@ -11,5 +11,6 @@
 6. CycleGAN => Apple2Orange, Mone
 7. DCGAN => CelebA
 8. Neural_Transfer => real_image, drawing image
+9. BEGAN => CelebA 64*64
 ----------------------------------
 
