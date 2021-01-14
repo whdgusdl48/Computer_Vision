@@ -16,3 +16,8 @@
 11. DISCO GAN => edges2shoes 128*128
 ----------------------------------
 
+# Reading analysis GAN
+12. PG-GAN
+13. STAR GAN
+14. style GAN
+15. SAGAN
