@@ -122,14 +122,14 @@ class PGGAN():
             print('Current resolution: ',self.image_size)
 
             for image_batch in dataset:
-                print(image_batch.shape)
+
                 alpha_tensor = tf.constant(np.repeat(alpha,4).reshape(4,1),dtype=tf.float32)
                 d_loss = self.train_d(image_batch,alpha_tensor)
                 g_loss = self.train_g(alpha_tensor)
                 
                 alpha = min(1.,alpha + alpha_increment)
             if self.image_size[0] == 4:
-                seed = tf.random.uniform([4, 512],-1.,1.)
+                seed = tf.random.uniform([2, 512],-1.,1.)
                 
                 predictions = self.generator(seed)
                 predictions = np.array(predictions)
@@ -156,13 +156,13 @@ class PGGAN():
                 fig = plt.figure(figsize=(4,4))
 
                 for i in range(predictions.shape[0]):
-                    plt.subplot(4, 4, i+1)
+                    plt.subplot(2, 2, i+1)
                     plt.imshow(predictions[i, :, :, :], cmap='gray_r')
                     plt.axis('off')
 
                 plt.savefig('/home/ubuntu/bjh/Gan/PGGAN/image/image_at_epoch_{:04d}.png'.format(epoch))
             
-            if (epoch + 1) % 40 == 0:
+            if (epoch + 1) % 2 == 0:
                 checkpoint.save(file_prefix = checkpoint_prefix)
                 self.generator.save_weights(os.path.join('/home/ubuntu/bjh/Gan/PGGAN/model', '{}x{}_generator.h5'.format(self.image_size[0], self.image_size[1])))
                 self.discriminator.save_weights(os.path.join('/home/ubuntu/bjh/Gan/PGGAN/model', '{}x{}_discriminator.h5'.format(self.image_size[0], self.image_size[1])))
@@ -174,6 +174,7 @@ class PGGAN():
                     print('finish')
                     break
                 print('creating {} model'.format(self.image_size))
+                print(previous_image_size)
                 self.build_model()
                 self.generator.load_weights(os.path.join('/home/ubuntu/bjh/Gan/PGGAN/model', '{}x{}_generator.h5'.format(previous_image_size, previous_image_size)), by_name=True)
                 self.discriminator.load_weights(os.path.join('/home/ubuntu/bjh/Gan/PGGAN/model', '{}x{}_discriminator.h5'.format(previous_image_size, previous_image_size)), by_name=True)
@@ -421,6 +422,7 @@ class PGGAN():
 
     def build_128_generator(self):
         
+       # Initial block
         inputs = Input(shape=(self.z_dim))
         x = self.generator_input_block(inputs)
         alpha = Input((1),name='alpha')
@@ -433,13 +435,14 @@ class PGGAN():
                              name='upsample_{}x{}'.format(16,16))
         x, _ = self.upsample(x,in_filters=self.z_dim,filters=self.z_dim,
                              kernel_size=3,strides=1,padding='same',activation=tf.nn.leaky_relu,
-                             name='upsample_{}x{}'.format(32,32))  
+                             name='upsample_{}x{}'.format(32,32))
         x, _ = self.upsample(x,in_filters=self.z_dim,filters=256,
                              kernel_size=3,strides=1,padding='same',activation=tf.nn.leaky_relu,
-                             name='upsample_{}x{}'.format(64,64))
-        x, up_x = self.upsample(x,in_filters=256,filters=128,
+                             name='upsample_{}x{}'.format(64,64))                         
+        x,up_x = self.upsample(x,in_filters=256,filters=128,
                              kernel_size=3,strides=1,padding='same',activation=tf.nn.leaky_relu,
-                             name='upsample_{}x{}'.format(128,128))
+                             name='upsample_{}x{}'.format(128,128))                                                             
+        
 
         previous = EqualizeLearningRate(Conv2D(3,kernel_size=1,strides=1,
                                              padding='same',activation = self.output_activation,
@@ -666,14 +669,14 @@ class PGGAN():
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(32,32))
         prev_x = previous_rgb(down(inputs))
         prev_x = Multiply()([1-alpha,prev_x])
-        from_rgb = EqualizeLearningRate(Conv2D(self.z_dim,kernel_size=1,strides=1,
+        from_rgb = EqualizeLearningRate(Conv2D(256,kernel_size=1,strides=1,
                                         padding='same',activation=tf.nn.leaky_relu,
                                         kernel_initializer=self.kernel_initializer,
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(64,64))
         after_x = from_rgb(inputs)
-        after_x = self.downsample(after_x,filters1=self.z_dim,filters2=self.z_dim,
+        after_x = self.downsample(after_x,filters1=256,filters2=self.z_dim,
                              kernel_size=3,strides=1,padding='same',activation=tf.nn.leaky_relu,
-                             name='Down_{}x{}'.format(512,512))
+                             name='Down_{}x{}'.format(64,64))
         after_x = Multiply()([alpha,after_x])
         x = Add()([prev_x,after_x])
         x = self.downsample(x, filters1=512, filters2=512, kernel_size=3, strides=1,
@@ -690,20 +693,20 @@ class PGGAN():
         inputs = Input((128,128,3))
         alpha = Input((1), name='input_alpha')
         down = AveragePooling2D(pool_size=2)
-        previous_rgb = EqualizeLearningRate(Conv2D(self.z_dim,kernel_size=1,strides=1,
+        previous_rgb = EqualizeLearningRate(Conv2D(256,kernel_size=1,strides=1,
                                         padding='same',activation=tf.nn.leaky_relu,
                                         kernel_initializer=self.kernel_initializer,
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(64,64))
         prev_x = previous_rgb(down(inputs))
         prev_x = Multiply()([1-alpha,prev_x])
-        from_rgb = EqualizeLearningRate(Conv2D(self.z_dim,kernel_size=1,strides=1,
+        from_rgb = EqualizeLearningRate(Conv2D(128,kernel_size=1,strides=1,
                                         padding='same',activation=tf.nn.leaky_relu,
                                         kernel_initializer=self.kernel_initializer,
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(128,128))
         after_x = from_rgb(inputs)
-        after_x = self.downsample(after_x,filters1=self.z_dim,filters2=self.z_dim,
+        after_x = self.downsample(after_x,filters1=128,filters2=256,
                              kernel_size=3,strides=1,padding='same',activation=tf.nn.leaky_relu,
-                             name='Down_{}x{}'.format(512,512))
+                             name='Down_{}x{}'.format(128,128))
         after_x = Multiply()([alpha,after_x])
         x = Add()([prev_x,after_x])                                
         x = self.downsample(x, filters1=256, filters2=512, kernel_size=3, strides=1,
@@ -716,27 +719,27 @@ class PGGAN():
                                             padding='same', activation=tf.nn.leaky_relu, name='Down_{}x{}'.format(8,8))
         x = self.discriminator_output_block(x)
         model = Model(inputs=[inputs, alpha], outputs=x)
-        return model   
+      
         return model
 
     def build_256_discriminator(self):
         inputs = Input((256,256,3))
         alpha = Input((1), name='input_alpha')
         down = AveragePooling2D(pool_size=2)
-        previous_rgb = EqualizeLearningRate(Conv2D(self.z_dim,kernel_size=1,strides=1,
+        previous_rgb = EqualizeLearningRate(Conv2D(128,kernel_size=1,strides=1,
                                         padding='same',activation=tf.nn.leaky_relu,
                                         kernel_initializer=self.kernel_initializer,
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(128,128))
         prev_x = previous_rgb(down(inputs))
         prev_x = Multiply()([1-alpha,prev_x])
-        from_rgb = EqualizeLearningRate(Conv2D(self.z_dim,kernel_size=1,strides=1,
+        from_rgb = EqualizeLearningRate(Conv2D(64,kernel_size=1,strides=1,
                                         padding='same',activation=tf.nn.leaky_relu,
                                         kernel_initializer=self.kernel_initializer,
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(256,256))
         after_x = from_rgb(inputs)
-        after_x = self.downsample(after_x,filters1=self.z_dim,filters2=self.z_dim,
+        after_x = self.downsample(after_x,filters1=64,filters2=128,
                              kernel_size=3,strides=1,padding='same',activation=tf.nn.leaky_relu,
-                             name='Down_{}x{}'.format(512,512))
+                             name='Down_{}x{}'.format(256,256))
         after_x = Multiply()([alpha,after_x])
         x = Add()([prev_x,after_x])
 
@@ -758,18 +761,18 @@ class PGGAN():
         inputs = Input((512,512,3))
         alpha = Input((1), name='input_alpha')
         down = AveragePooling2D(pool_size=2)
-        previous_rgb = EqualizeLearningRate(Conv2D(self.z_dim,kernel_size=1,strides=1,
+        previous_rgb = EqualizeLearningRate(Conv2D(64,kernel_size=1,strides=1,
                                         padding='same',activation=tf.nn.leaky_relu,
                                         kernel_initializer=self.kernel_initializer,
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(256,256))
         prev_x = previous_rgb(down(inputs))
         prev_x = Multiply()([1-alpha,prev_x])
-        from_rgb = EqualizeLearningRate(Conv2D(self.z_dim,kernel_size=1,strides=1,
+        from_rgb = EqualizeLearningRate(Conv2D(32,kernel_size=1,strides=1,
                                         padding='same',activation=tf.nn.leaky_relu,
                                         kernel_initializer=self.kernel_initializer,
                                         bias_initializer = 'zeros'),name='from_rgb_{}x{}'.format(512,512))
         after_x = from_rgb(inputs)
-        after_x = self.downsample(after_x,filters1=self.z_dim,filters2=self.z_dim,
+        after_x = self.downsample(after_x,filters1=32,filters2=64,
                              kernel_size=3,strides=1,padding='same',activation=tf.nn.leaky_relu,
                              name='Down_{}x{}'.format(512,512))
         after_x = Multiply()([alpha,after_x])
