@@ -15,10 +15,11 @@
 10. LSGAN => CelebA 128*128
 11. DISCO GAN => edges2shoes 128*128
 12. PG-GAN => ImageGenerating... 4*4 => 512*512
+13. SAGAN => ImageGenerating... FFHQ Face Data set 128,128
 ----------------------------------
 
 # Reading analysis GAN
 
-13. STAR GAN
-14. style GAN
-15. SAGAN
+14. STAR GAN
+15. style GAN
+
