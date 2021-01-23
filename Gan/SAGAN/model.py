@@ -1,12 +1,13 @@
 import tensorflow as tf
 import numpy as np
 import tensorflow.keras.backend as K
-from  tensorflow.keras.layers import Dropout,Add,Input,ReLU,Conv2D,Activation,BatchNormalization,LeakyReLU,Dense,Reshape,Conv2DTranspose,Flatten
+from  tensorflow.keras.layers import Dropout,InputSpec,UpSampling2D,Add,Input,ReLU,Conv2D,Activation,BatchNormalization,LeakyReLU,Dense,Reshape,Conv2DTranspose,Flatten
 from tensorflow.keras.models import Sequential, Model
 import os
 import time
 import matplotlib.pyplot as plt
-import partial
+from functools import partial
+from tensorflow import reduce_mean
 
 class ReflectionPadding2D(tf.keras.layers.Layer):
     def __init__(self, padding=(1, 1), **kwargs):
@@ -32,9 +33,9 @@ class SAGAN():
                  checkpoint_dir,
                  epochs):
         self.z_dim = 128
-        self.generator_layer_num = generator_layer_num
-        self.discriminator_layer_num = discriminator_layer_num
         self.image_size = image_size
+        self.generator_layer_num = int(np.log2(self.image_size[0])) - 3
+        self.discriminator_layer_num = int(np.log2(self.image_size[0])) - 3
         self.generator = self.build_generator()
         self.discriminator = self.build_discriminator()
         self.discriminator_optimizer = tf.keras.optimizers.Adam(0.0004,0.0)
@@ -51,15 +52,18 @@ class SAGAN():
                                  generator=self.generator,
                                  discriminator=self.discriminator
                                 )
+        z = np.random.normal(0,1,(self.batch_size,self.z_dim))
 
         for epoch in range(self.epochs):
             start = time.time()
             print('start')
-            z = np.random.normal(0,1,(self.batch_size,self.z_dim))
             for image_batch in dataset:
-                d_loss = self.train_d(image_batch)
-                g_loss = self.train_g()
+                for _ in range(5):
+                    self.train_d(image_batch)
+                    d_loss = self.train_d(image_batch)
             
+                g_loss = self.train_g()
+                print(d_loss,g_loss)
             seed = tf.random.uniform([1, self.z_dim],-1.,1.)
             predictions = self.generator(seed)
             predictions = np.array(predictions)
@@ -68,7 +72,7 @@ class SAGAN():
             plt.imshow(predictions [0,:, :, :], cmap='gray_r')
             plt.axis('off')
 
-            plt.savefig('/home/ubuntu/bjh/Gan/PGGAN/image/image_at_epoch_{:04d}.png'.format(epoch))
+            plt.savefig('/home/ubuntu/bjh/Gan/SAGAN/image/image_at_epoch_{:04d}.png'.format(epoch))
 
             if (epoch + 1) % 15 == 0:
                 checkpoint.save(file_prefix = checkpoint_prefix)
@@ -81,9 +85,41 @@ class SAGAN():
         plt.imshow(predictions [0,:, :, :], cmap='gray_r')
         plt.axis('off')
 
-        plt.savefig('/home/ubuntu/bjh/Gan/PGGAN/image/image_at_epoch_{:04d}.png'.format(epoch))   
+        plt.savefig('/home/ubuntu/bjh/Gan/SAGAN/image/image_at_epoch_{:04d}.png'.format(epoch))   
 
-    def gradient_penalty(self,real,fake):
+    def d_loss_fn(self,f_logit, r_logit):
+        
+        return reduce_mean(f_logit * r_logit)
+
+    def g_loss_fn(self,f_logit):
+        f_loss = -reduce_mean(f_logit)
+        return f_loss
+
+    def train_g(self):
+        z = np.random.normal(0,1,(self.batch_size,self.z_dim))
+        with tf.GradientTape() as t:
+            x_fake = self.generator(z,training=True)
+            fake_logits = self.discriminator(x_fake,training=True)
+            loss = self.g_loss_fn(fake_logits)
+        grad = t.gradient(loss, self.generator.trainable_variables)
+        self.generator_optimizer.apply_gradients(zip(grad, self.generator.trainable_variables))
+        return loss 
+
+    def train_d(self,x_real):
+        z = np.random.normal(0,1,(self.batch_size,self.z_dim))
+        with tf.GradientTape() as t:
+            x_fake = self.generator(z,training=True)
+            fake_logits = self.discriminator(x_fake,training=True)
+            real_logits = self.discriminator(x_real,training=True)
+            cost = self.d_loss_fn(fake_logits,real_logits)
+            gp = self.gradient_penalty(partial(self.discriminator,training=True),x_real,x_fake)
+            cost += 5 * gp
+        grad = t.gradient(cost,self.discriminator.trainable_variables)
+        self.discriminator_optimizer.apply_gradients(zip(grad,self.discriminator.trainable_variables))
+        return cost
+
+    def gradient_penalty(self,f,real,fake):
+        
         in_shape = K.shape(real)
         shape = K.concatenate([in_shape[0:1], K.ones_like(in_shape[1:], dtype='int32')], axis=0)
         alpha = K.random_uniform(shape)
@@ -94,39 +130,8 @@ class SAGAN():
         grad = t.gradient(pred,[inter])[0]
         slopes = tf.sqrt(tf.reduce_sum(tf.square(grad)))
         gp = tf.reduce_mean((slopes - 1.) ** 2)
+        return gp    
 
-        return gp
-
-    def train_d(self,real):
-        z = np.random.normal(0,1,(self.batch_size,self.z_dim))
-
-        with tf.GradientTape() as t:
-            x_fake = self.generator(z,training=True)
-            fake_logits = self.discriminator(x_fake,training=True)
-            real_logits = self.discriminator(real,training=True)    
-            f_loss = tf.reduce_mean(fake_logits)
-            r_loss = tf.reduce_mean(real_logits)
-            loss = f_loss + r_loss
-            gp = self.gradient_penalty(partial(self.discriminator,training=True),real,x_fake)
-            loss += 5 * gp
-
-        grad = t.gradient(cost,self.discriminator.trainable_variables)
-        self.discriminator_optimizer.apply_gradients(zip(grad,self.discriminator.trainable_variable))
-
-        return loss
-
-    def train_g(self):
-        z = np.random.normal(0,1,(self.batch_size,self.z_dim))
-
-        with tf.GradientTape() as t:
-            x_fake = self.generator(z,training=True)
-            fake_logits = self.discriminator(x_fake,training=True)
-            loss = -tf.reduce_mean(fake_logits)
-        
-        grad = t.gradient(loss,self.generator.trainable_variable)
-        self.generator_optimizer.apply_gradients(zip(grad,self.generator_optimizer))
-
-        return loss
 
     def UpBlock(self,layers,filters):
         
@@ -143,7 +148,7 @@ class SAGAN():
 
         add_x = layers
         add_x = UpSampling2D()(x)
-        add_x = Conv2D(filters=filters,kernel=1,strides=1,padding='same')(x)
+        add_x = Conv2D(filters=filters,kernel_size=1,strides=1,padding='same')(x)
 
         add = Add()([x,add_x])
 
@@ -160,7 +165,9 @@ class SAGAN():
         x = LeakyReLU(alpha=0.2)(layers)
         x = ReflectionPadding2D(padding=(1,1))(x)
         x = Conv2D(filters=filters,kernel_size=3,strides=1,padding='valid')(x)
-        
+        if to_down:
+            x = tf.keras.layers.AveragePooling2D(2,2)(x)
+
         if to_down or init_channel != filters:
             layers = Conv2D(filters=filters,kernel_size=1,strides=1,padding='same')(layers)
             if to_down:
@@ -170,16 +177,16 @@ class SAGAN():
 
         return add
     
-    def init_down_resblock(self,layers):
+    def init_down_resblock(self,layers,filters):
 
         x = ReflectionPadding2D(padding=(1,1))(layers)
         x = Conv2D(filters=filters,kernel_size=3,strides=1,padding='valid')(x)
-
+        x = LeakyReLU(0.2)(x)
         x = ReflectionPadding2D(padding=(1,1))(layers)
         x = Conv2D(filters=filters,kernel_size=3,strides=1,padding='valid')(x)
-
+        x = tf.keras.layers.AveragePooling2D(2,2)(x)
         add_x = tf.keras.layers.AveragePooling2D(2,2)(layers)
-        add_x = Conv2D(filters=filters,kernel=1,strides=1,padding='same')(add_x)
+        add_x = Conv2D(filters=filters,kernel_size=1,strides=1,padding='same')(add_x)
 
         add = Add()([x,add_x])
 
@@ -187,21 +194,21 @@ class SAGAN():
 
     def Attention(self,layers,filters):
 
-        f = Conv2D(filters=filters//8,kernel_size=1,strides=1,padding='same')(layers)
-        g = Conv2D(filters=filters//8,kernel_size=1,strides=1,padding='same')(layers)
+        f = Conv2D(filters=filters,kernel_size=1,strides=1,padding='same')(layers)
+        g = Conv2D(filters=filters,kernel_size=1,strides=1,padding='same')(layers)
         h = Conv2D(filters=filters,kernel_size=1,strides=1,padding='same')(layers)
 
-        beta = tf.kears.layers.Multiply()([f,g])
-        activaton1 = Activation('softmax')(beta)
-
-        gamma = tf.keras.Multiply()(activaton1,h)
+        beta = tf.keras.layers.Multiply()([f,g])
+        activation1 = Activation('softmax')(beta)
+        # print(activation1.shape,h.shape)
+        gamma = tf.keras.layers.Multiply()([activation1,h])
 
         x = Conv2D(filters=filters,kernel_size=1,strides=1,padding='same')(gamma)
 
         return x
     
-    def build_generator(self)
-        input = Input(shape=(self.z_dim))
+    def build_generator(self):
+        input = Input(shape=(self.z_dim,))
         init_filters = 1024
         x = input
         x = Dense(4*4*init_filters)(x)
@@ -226,16 +233,17 @@ class SAGAN():
 
         x = ReflectionPadding2D(padding=(1,1))(x)
         x = Conv2D(filters=3,kernel_size=3,strides=1,padding='valid')(x)
-        x = Activation('tanh')(x)
+
 
         model = Model(input,x)
+        model.summary()
         return model
 
     def build_discriminator(self):
 
         init_filters= 64
-        input = Input(shape(self.image_size))
-        x = self.init_down_resblock(input)
+        input = Input(shape=(self.image_size))
+        x = self.init_down_resblock(input,init_filters)
         x = self.DownBlock(x,init_filters * 2)
         x = self.Attention(x,init_filters * 2)
 
@@ -243,16 +251,16 @@ class SAGAN():
 
         for i in range(self.discriminator_layer_num):
             if i == self.discriminator_layer_num - 1:
-                x = self.DownBlock(x,init_filters)
+                x = self.DownBlock(x,init_filters,to_down=False)
             else:
                 x = self.DownBlock(x,init_filters * 2)
 
             init_filters = init_filters * 2
 
         x = LeakyReLU(0.2)(x)
-        x = tf.keras.layers.GlobalAveragePooling2D(2,2)(x)
+        print(x.shape)
         x = Flatten()(x)
-        x = Dense(1)
+        x = Dense(1)(x)
 
         model = Model(input,x)
         return model
