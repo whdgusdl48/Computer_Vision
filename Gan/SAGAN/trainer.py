@@ -78,15 +78,26 @@ class Trainer(object):
         return self.gpl * tf.reduce_mean(tf.square(grad_norm - 1.))
 
     def get_data_generator(self):
-        images = []
-        for dirname, dirnames, filenames in os.walk(self.data_path):
-            images += [os.path.join(dirname, f) for f in filenames]
+        data = []
+        img_path = os.path.join(self.data_path)
+        img_list= os.listdir(img_path)
+        print(len(img_list))
+        for i in range(4000):
+            number = np.random.randint(0,len(img_list))
+            data_img = cv2.imread(img_path + "/" + img_list[number])
+            data_img = cv2.cvtColor(data_img,cv2.COLOR_BGR2RGB)
+            data_img = np.array(data_img)
+            data_img = cv2.resize(data_img,(128,128),interpolation = cv2.INTER_CUBIC)
+            data.append(data_img)
+    
+        data = np.array(data)
+        print(data.shape)
+        data = tf.cast(data,tf.float32)
+        data = (data - 127.5) / 127.5
+        data = tf.data.Dataset.from_tensor_slices(data).shuffle(len(data)).batch(16)
         
-        self.nbatch = int(np.ceil(len(images) / self.batch_size))
-        return DataGenerator(images,
-                            image_size=self.image_size,
-                            batch_size=self.batch_size)
-
+        return data
+        
     def load_pretrained_model(self):
         if self.g_pretrained_model:
             self.g.load_weights(self.g_pretrained_model) 
@@ -134,7 +145,7 @@ class Trainer(object):
 
             gp = self.gradient_penalty(real_img, fake_img)
             
-            total_loss = real_loss + fake_loss + gp
+            total_loss = real_loss + fake_loss + gp * 10
 
         gradients = tape_d.gradient(total_loss, self.d.trainable_variables)
         self.d_opt.apply_gradients(zip(gradients, self.d.trainable_variables))
@@ -159,22 +170,23 @@ class Trainer(object):
         
         for epoch in range(self.epoch_start, self.epoch_start + self.epoch):
             epoch_start_time = time.time()
-            z = tf.random.truncated_normal(shape=(self.batch_size, self.z_dim), dtype=tf.float32)
-            d_loss, gp_loss = self.train_discriminator_step(self.data_generator.generator.__next__(), z)
-            g_loss = self.train_generator_step(z)
-            print(d_loss,gp_loss)
-            for i in range(self.nbatch-1):
+            for image_batch in self.data_generator:
                 z = tf.random.truncated_normal(shape=(self.batch_size, self.z_dim), dtype=tf.float32)
-                d_loss, gp_loss = self.train_discriminator_step(self.data_generator.generator.__next__(), z)
+                d_loss, gp_loss = self.train_discriminator_step(image_batch, z)
                 g_loss = self.train_generator_step(z)
-            print(d_loss)
-            if (epoch % self.print_freq) == 0:
+                
+                for i in range(3):
+                    z = tf.random.normal(shape=(self.batch_size, self.z_dim), dtype=tf.float32)
+                    d_loss, gp_loss = self.train_discriminator_step(image_batch, z)
+                    g_loss = self.train_generator_step(z)
+               
+            if (epoch % 1) == 0:
                 print('epoch {}/{} ({:.2f} sec):, d_loss {:.4f}, gp_loss {:.4f}, g_loss {:.4f}'.format(
                     epoch, self.epoch_start + self.epoch,
                     time.time() - epoch_start_time,
                     d_loss.numpy(), gp_loss.numpy(), g_loss.numpy()))
 
-            if (epoch % self.save_freq) == 0:
+            if (epoch % 1) == 0:
                 self.save_models(epoch)
                 self.save_samples(epoch)
 
