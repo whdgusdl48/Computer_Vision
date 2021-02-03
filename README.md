@@ -1,7 +1,13 @@
+# Computer Vision
+
+# We Learning CNN, Segmentation, GAN,
+
+# CNN
+----------------------------------
+1. LeNet-5
+2. AlexNet
+
 # GAN
-
-# We Learning GAN
-
 ----------------------------------
 1. VAE
 2. GAN
