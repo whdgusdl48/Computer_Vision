@@ -32,7 +32,7 @@ class AlexNet():
         optimizer = tf.keras.optimizers.Adam(lr=self.lr)
         self.model.compile(loss='categorical_crossentropy',optimizer=optimizer,metrics=['acc'])
 
-        history = self.model.fit(x = dataset,epochs = self.epochs,validation_data = testdataset)
+        history = self.model.fit_generator(dataset,epochs = self.epochs,validation_data = testdataset,validation_steps=10)
     
     def loss(self,logits,labels):
         loss = tf.reduce_mean(tf.keras.losses.categorical_crossentropy(logits,labels))
@@ -77,13 +77,13 @@ class AlexNet():
     def Net(self):
         input = Input(shape=self.image_size)
         x = input
-        x = Conv2D(filters=96,kernel_size=11,strides=4,padding='same',name='conv_layer_1')(x)
+        x = Conv2D(filters=96,kernel_size=11,strides=4,name='conv_layer_1')(x)
         x = Activation('relu')(x)
-        x = Conv2D(filters=256,kernel_size=5,strides=1,padding='same',name='conv_layer_2')(x)
+        x = Conv2D(filters=256,kernel_size=5,strides=1,name='conv_layer_2')(x)
         x = Activation('relu')(x)
         x = BatchNormalization()(x)
         x = MaxPooling2D(pool_size=(2,2),strides=2)(x)
-        x = Conv2D(filters=384,kernel_size=3,strides=1,padding='same',name='conv_layer_3')(x)
+        x = Conv2D(filters=384,kernel_size=3,strides=1,name='conv_layer_3')(x)
         x = BatchNormalization()(x)
         x = MaxPooling2D(pool_size=(2,2),strides=2)(x)
         x = Conv2D(filters=384,kernel_size=3,strides=1,padding='same',name='conv_layer_4')(x)

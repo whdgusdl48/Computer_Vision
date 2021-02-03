@@ -22,7 +22,6 @@ if gpus:
     print(1)
 
 train_data, test_data = load_data()
-
-model = AlexNet(32,(224,224,3),100,0.001)
+model = AlexNet(32,(112,112,3),100,0.001)
 
 model.train_fit(train_data,test_data)
