@@ -7,6 +7,8 @@
 1. LeNet-5
 2. AlexNet
 3. VGG16
+4. ResNet
+5. GoogLeNet(Inception)
 
 
 # GAN
