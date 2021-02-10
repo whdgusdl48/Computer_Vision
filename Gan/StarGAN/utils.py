@@ -2,7 +2,7 @@ import os
 import random
 import numpy as np
 import cv2
-
+import tensorflow as tf
 class ImageData:
 
     def __init__(self,data_dir,select_attrs):
@@ -128,7 +128,8 @@ def get_loader(filenames,labels,fix_labels,image_size=128,batch_size=16,mode='tr
             imgs.append(image)
         
         imgs = np.array(imgs) / 127.5 - 1
-        orig_labels = np.array(labels[i*batch_size:(i+1)*batch_size])
-        target_labels = np.random.permutation(orig_labels)
+        imgs = tf.cast(imgs,tf.float32)
+        orig_labels = np.array(labels[i*batch_size:(i+1)*batch_size]).astype(np.float32)
+        target_labels = np.random.permutation(orig_labels).astype(np.float32)
         yield imgs,orig_labels,target_labels,fix_labels[i*batch_size:(i+1)*batch_size],batch
     

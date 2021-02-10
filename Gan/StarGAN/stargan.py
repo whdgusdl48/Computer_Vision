@@ -61,8 +61,16 @@ class StarGAN(object):
         # Custom image
         self.custom_image_name = args.custom_image_name
         self.custom_image_label = args.custom_image_label
+        
+        #build model
+        self.G = self.build_generator()
+        self.D = self.build_discriminator()
+        self.G_optimizer = tf.keras.optimizers.Adam(lr = self.g_lr,beta_1=self.beta1,beta_2 = self.beta2)
+        self.D_optimizer = tf.keras.optimizers.Adam(lr = self.d_lr,beta_1=self.beta1,beta_2 = self.beta2)
 
-    
+        self.Image_data_class = ImageData(data_dir=self.data_dir, select_attrs=self.selected_attrs)
+        self.Image_data_class.preprocess()
+
     def residual_Block(self,input_layer,dim_out):
         x = ZeroPadding2D(padding=1)(input_layer)
         x = Conv2D(filters=dim_out,kernel_size=3,strides=1,padding='valid',use_bias = False)(x)
@@ -138,14 +146,89 @@ class StarGAN(object):
         out_cls = Reshape((self.c_dim, ))(out_cls)
     
         return Model(inp_img, [out_src, out_cls]) 
+ 
 
     def classification_loss(self,y_true,y_pred):
-        return tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=y_true, logits=y_pred))
+        a = tf.keras.losses.CategoricalCrossentropy()
+        return tf.reduce_mean(a(y_true,y_pred))
 
     def w_loss(self,y_true,y_pred):
-        return K.mean(y_true * y_pred)
+        return -K.mean(y_true * y_pred)
     
     def reconstruct_loss(self,y_true,y_pred):
         return K.mean(K.abs(y_true - y_pred))
     
-    def train_d(self,)
+    def gradient_penalty(self,f,real,fake):
+        
+        in_shape = K.shape(real)
+        shape = K.concatenate([in_shape[0:1], K.ones_like(in_shape[1:], dtype='int32')], axis=0)
+        alpha = K.random_uniform(shape)
+        inter =  (alpha * real) + ((1 - alpha) * fake)
+        with tf.GradientTape() as t:
+            t.watch(inter)
+            gp_src,pred = f(inter)
+        grad = t.gradient(pred,[inter])[0]
+        slopes = tf.sqrt(tf.reduce_sum(tf.square(grad)))
+        gp = tf.reduce_mean((slopes - 1.) ** 2)
+        return gp
+
+    def train_g(self,x_real,labels,orig_labels):
+        # G_loss = self.train_G.train_on_batch(x = [imgs, orig_labels, target_labels], y = [valid, target_labels, imgs])
+        with tf.GradientTape() as t:
+            valid = -np.ones((self.batch_size, 2, 2, 1))
+            fake =  np.ones((self.batch_size, 2, 2, 1))
+
+            x_fake = self.G([x_real,labels],training=True)
+            fake_src,fake_logits = self.D(x_fake,training=True)
+            x_recon = self.G([x_fake,orig_labels],training=True)
+            cost = self.classification_loss(labels,fake_logits)
+            print(cost)
+            cost2 = self.w_loss(valid,fake_src)
+            cost3 = self.reconstruct_loss(x_real,x_recon)
+            loss = cost + cost2 + 10 * cost3
+        grad = t.gradient(loss, self.G.trainable_variables)
+        self.G_optimizer.apply_gradients(zip(grad, self.G.trainable_variables))
+        return [loss,cost,cost2,cost3]
+    # train loss
+    def train_d(self,x_real,labels,orig_labels):
+        # D_loss = self.train_D.train_on_batch(x = [imgs, target_labels], y = [valid, orig_labels, fake, dummy])
+        with tf.GradientTape() as t:
+            valid = -np.ones((self.batch_size, 2, 2, 1))
+            fake =  np.ones((self.batch_size, 2, 2, 1))
+
+            x_fake = self.G([x_real,labels],training=True)
+            fake_src,fake_logit = self.D(x_fake,training=True)
+            real_src,real_logit = self.D(x_real,training=True)
+            real_w_loss = self.w_loss(valid,real_src)
+            real_class = self.classification_loss(orig_labels,real_logit)
+
+            fake_w_loss =self.w_loss(fake,fake_src)
+            gp = self.gradient_penalty(partial(self.D,training=True),x_real,x_fake)
+
+            loss = real_w_loss + real_class +fake_w_loss+ 10 * gp
+        grad = t.gradient(loss,self.D.trainable_variables)
+        self.D_optimizer.apply_gradients(zip(grad,self.D.trainable_variables))
+        return [loss,real_w_loss,real_class,fake_w_loss,gp]
+
+    def train(self):
+        data_iter = get_loader(self.Image_data_class.train_dataset, self.Image_data_class.train_dataset_label, self.Image_data_class.train_dataset_fix_label, 
+                               image_size=self.image_size, batch_size=self.batch_size, mode=self.mode)
+        
+        for epoch in range(self.num_iters):
+            imgs,orig_labels,target_labels,fix_labels, _ = next(data_iter)
+
+            D_loss = self.train_d(imgs,target_labels,orig_labels)
+
+            if (epoch + 1) % self.n_critic == 0:
+                G_loss = self.train_g(imgs,target_labels,orig_labels)
+            
+            if (epoch + 1) % self.log_step == 0:
+                print(f"Iteration: [{epoch + 1}/{self.num_iters}]")
+                print(f"\tD/loss_real = [{D_loss[1]:.4f}], D/loss_fake = [{D_loss[3]:.4f}], D/loss_cls =  [{D_loss[2]:.4f}], D/loss_gp = [{D_loss[4]:.4f}]")
+                print(f"\tG/loss_fake = [{G_loss[1]:.4f}], G/loss_rec = [{G_loss[3]:.4f}], G/loss_cls = [{G_loss[2]:.4f}]") 
+            
+            if (epoch + 1) % self.model_save_step == 0:  
+                self.G.save_weights(os.path.join(self.model_save_dir, 'G_weights.hdf5'))
+                self.D.save_weights(os.path.join(self.model_save_dir, 'D_weights.hdf5'))
+                self.train_D.save_weights(os.path.join(self.model_save_dir, 'train_D_weights.hdf5'))
+                self.train_G.save_weights(os.path.join(self.model_save_dir, 'train_G_weights.hdf5')) 
