@@ -1,215 +1,136 @@
-"""
-StarGAN v2 TensorFlow Implementation
-Copyright (c) 2020-present NAVER Corp.
-
-This work is licensed under the Creative Commons Attribution-NonCommercial
-4.0 International License. To view a copy of this license, visit
-http://creativecommons.org/licenses/by-nc/4.0/ or send a letter to
-Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
-"""
-
-import numpy as np
 import os
-import cv2
-
-import tensorflow as tf
 import random
-from glob import glob
+import numpy as np
+import cv2
+import tensorflow as tf
+class ImageData:
 
-class Image_data:
+    def __init__(self,data_dir,select_attrs):
+        # select image in select_attr_domain
+        # we are extract blond hair, black_hair, brown hair, male, young
+        self.selected_attrs = select_attrs
 
-    def __init__(self, img_size, channels, dataset_path, domain_list, augment_flag):
-        self.img_height = img_size
-        self.img_width = img_size
-        self.channels = channels
-        self.augment_flag = augment_flag
+        self.data_path = os.path.join(data_dir,'img_align_celeba/img_align_celeba')
+        self.lines = open(os.path.join(data_dir,'list_attr_celeba.csv')).readlines()
 
-        self.dataset_path = dataset_path
-        self.domain_list = domain_list
+        self.train_dataset = []
+        self.train_dataset_label = []
+        self.train_dataset_fix_label = []
 
-        self.images = []
-        self.shuffle_images = []
-        self.domains = []
+        self.test_dataset = []
+        self.test_dataset_label = []
+        self.test_dataset_fix_label = []
 
-
-    def image_processing(self, filename, filename2, domain):
-
-        x = tf.io.read_file(filename)
-        x_decode = tf.image.decode_jpeg(x, channels=self.channels, dct_method='INTEGER_ACCURATE')
-        img = tf.image.resize(x_decode, [self.img_height, self.img_width])
-        img = preprocess_fit_train_image(img)
-
-        x = tf.io.read_file(filename2)
-        x_decode = tf.image.decode_jpeg(x, channels=self.channels, dct_method='INTEGER_ACCURATE')
-        img2 = tf.image.resize(x_decode, [self.img_height, self.img_width])
-        img2 = preprocess_fit_train_image(img2)
-
-        if self.augment_flag :
-            seed = random.randint(0, 2 ** 31 - 1)
-            condition = tf.greater_equal(tf.random.uniform(shape=[], minval=0.0, maxval=1.0), 0.5)
-
-            augment_height_size = self.img_height + (30 if self.img_height == 256 else int(self.img_height * 0.1))
-            augment_width_size = self.img_width + (30 if self.img_width == 256 else int(self.img_width * 0.1))
-
-            img = tf.cond(pred=condition,
-                          true_fn=lambda : augmentation(img, augment_height_size, augment_width_size, seed),
-                          false_fn=lambda : img)
-
-            img2 = tf.cond(pred=condition,
-                          true_fn=lambda: augmentation(img2, augment_height_size, augment_width_size, seed),
-                          false_fn=lambda: img2)
-
-        return img, img2, domain
+        self.attr2idx = {}
+        self.idx2attr = {}
 
     def preprocess(self):
-        # self.domain_list = ['tiger', 'cat', 'dog', 'lion']
+        all_attr_name = self.lines[0].split(',')[1:]
+        all_attr_name[-1] = all_attr_name[-1].replace('\n','')
+        for i, attr_name in enumerate(all_attr_name):
+            self.attr2idx[attr_name] = i
+            # domain => int
+            self.idx2attr[i] = attr_name
+            # int => domain
+        lines = self.lines[1:]
+        random.seed(2)
+        random.shuffle(lines)
 
-        for idx, domain in enumerate(self.domain_list):
-            image_list = glob(os.path.join(self.dataset_path, domain) + '/*.png') + glob(os.path.join(self.dataset_path, domain) + '/*.jpg')
-            shuffle_list = random.sample(image_list, len(image_list))
-            domain_list = [[idx]] * len(image_list)  # [ [0], [0], ... , [0] ]
+        for i, line in enumerate(lines):
+            split = line.split(',')
+            split[-1] = split[-1].replace('\n','')
+            filename = os.path.join(self.data_path,split[0])
+            value = split[1:]
 
-            self.images.extend(image_list)
-            self.shuffle_images.extend(shuffle_list)
-            self.domains.extend(domain_list)
+            label = []
 
-def adjust_dynamic_range(images, range_in, range_out, out_dtype):
-    scale = (range_out[1] - range_out[0]) / (range_in[1] - range_in[0])
-    bias = range_out[0] - range_in[0] * scale
-    images = images * scale + bias
-    images = tf.clip_by_value(images, range_out[0], range_out[1])
-    images = tf.cast(images, dtype=out_dtype)
-    return images
+            for attr_name in self.selected_attrs:
+                idx = self.attr2idx[attr_name]
 
-def preprocess_fit_train_image(images):
-    images = adjust_dynamic_range(images, range_in=(0.0, 255.0), range_out=(-1.0, 1.0), out_dtype=tf.dtypes.float32)
-    return images
+                if value[idx] == '1':
+                    label.append(1)
+                else:
+                    label.append(0)
 
-def postprocess_images(images):
-    images = adjust_dynamic_range(images, range_in=(-1.0, 1.0), range_out=(0.0, 255.0), out_dtype=tf.dtypes.float32)
-    images = tf.cast(images, dtype=tf.dtypes.uint8)
-    return images
+            if i < 2000:
+                self.test_dataset.append(filename)
+                self.test_dataset_label.append(label)
 
-def load_images(image_path, img_size, img_channel):
-    x = tf.io.read_file(image_path)
-    x_decode = tf.image.decode_jpeg(x, channels=img_channel, dct_method='INTEGER_ACCURATE')
-    img = tf.image.resize(x_decode, [img_size, img_size])
-    img = preprocess_fit_train_image(img)
+            else:
+                self.train_dataset.append(filename)
+                self.train_dataset_label.append(label)
 
-    return img
+        self.test_dataset_fix_label = create_labels(self.test_dataset_label,self.selected_attrs)
+        self.train_dataset_fix_label = create_labels(self.train_dataset_label,self.selected_attrs)
 
-def augmentation(image, augment_height, augment_width, seed):
-    ori_image_shape = tf.shape(image)
-    image = tf.image.random_flip_left_right(image, seed=seed)
-    image = tf.image.resize(image, [augment_height, augment_width])
-    image = tf.image.random_crop(image, ori_image_shape, seed=seed)
-    return image
+        print('Celeba Dataset preprocessing domain complete!!!')
 
-def load_test_image(image_path, img_width, img_height, img_channel):
+def create_labels(c_org,select_attrs=None):
+    "Generate target domain labels for debugging and testing"
+    c_org = np.asarray(c_org)
+    hair_color_indices = []
+    for i, attr_name in enumerate(select_attrs):
+        if attr_name in ['Black_Hair','Blone_Hair','Gray_Hair']:
+            hair_color_indices.append(i)
+    
+    c_target_list = []
 
-    if img_channel == 1 :
-        img = cv2.imread(image_path, flags=cv2.IMREAD_GRAYSCALE)
-    else :
-        img = cv2.imread(image_path, flags=cv2.IMREAD_COLOR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    for i in range(len(select_attrs)):
+        c_trg = c_org.copy()
 
-    img = cv2.resize(img, dsize=(img_width, img_height))
+        if i in hair_color_indices:
+            c_trg[:,i] = 1.0
+            for j in hair_color_indices:
+                if j != i:
+                    c_trg[:,j] = 0.0
 
-    if img_channel == 1 :
-        img = np.expand_dims(img, axis=0)
-        img = np.expand_dims(img, axis=-1)
-    else :
-        img = np.expand_dims(img, axis=0)
+        else:
+            c_trg[:,i] = (c_trg[:,i] == 0)
 
-    img = img/127.5 - 1
+        c_target_list.append(c_trg)
 
-    return img
+    c_target_list = np.transpose(c_target_list,axes=[1,0,2])
 
-def save_images(images, size, image_path):
-    # size = [height, width]
-    return imsave(inverse_transform(images), size, image_path)
+    return c_target_list
 
-def inverse_transform(images):
-    return ((images+1.) / 2) * 255.0
-
-
-def imsave(images, size, path):
-    images = merge(images, size)
-    images = cv2.cvtColor(images.astype('uint8'), cv2.COLOR_RGB2BGR)
-
-    return cv2.imwrite(path, images)
-
-def merge(images, size):
-    h, w = images.shape[1], images.shape[2]
-    img = np.zeros((h * size[0], w * size[1], 3))
-    for idx, image in enumerate(images):
-        i = idx % size[1]
-        j = idx // size[1]
-        img[h*j:h*(j+1), w*i:w*(i+1), :] = image
-
-    return img
-
-def return_images(images, size) :
-    x = merge(images, size)
-
-    return x
-
-def check_folder(log_dir):
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    return log_dir
+def resize_keep_aspect_ratio(image, width, height):
+    (h, w) = image.shape[:2]
+    dH = 0
+    dW = 0
+    if w < h:
+        image = cv2.resize(image, (width, int(h*width/w)), interpolation = cv2.INTER_AREA)
+        dH = int((image.shape[0] - height) / 2.0)
+    else:
+        image = cv2.resize(image, (int(w*height/h), height), interpolation = cv2.INTER_AREA)
+        dW = int((image.shape[1] - width) / 2.0)
+    (h, w) = image.shape[:2]
+    image = image[dH:h-dH, dW:w-dW]
+    return cv2.resize(image, (width, height), interpolation = cv2.INTER_AREA)           
 
 
-def str2bool(x):
-    return x.lower() in ('true')
+def get_loader(filenames,labels,fix_labels,image_size=128,batch_size=16,mode='train'):
 
-def pytorch_xavier_weight_factor(gain=0.02, uniform=False) :
+    n_batches = int(len(filenames)/batch_size)
+    total_samples = n_batches * batch_size
 
-    factor = gain * gain
-    mode = 'fan_avg'
-
-    return factor, mode, uniform
-
-def pytorch_kaiming_weight_factor(a=0.0, activation_function='relu') :
-
-    if activation_function == 'relu' :
-        gain = np.sqrt(2.0)
-    elif activation_function == 'leaky_relu' :
-        gain = np.sqrt(2.0 / (1 + a ** 2))
-    elif activation_function =='tanh' :
-        gain = 5.0 / 3
-    else :
-        gain = 1.0
-
-    factor = gain * gain
-    mode = 'fan_in'
-
-    return factor, mode
-
-def automatic_gpu_usage() :
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    if gpus:
-        try:
-            # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-        except RuntimeError as e:
-            # Memory growth must be set before GPUs have been initialized
-            print(e)
-
-def multiple_gpu_usage():
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    if gpus:
-        # Create 2 virtual GPUs with 1GB memory each
-        try:
-            tf.config.experimental.set_virtual_device_configuration(
-                gpus[0],
-                [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096),
-                 tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)])
-            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-            print(len(gpus), "Physical GPU,", len(logical_gpus), "Logical GPUs")
-        except RuntimeError as e:
-            # Virtual devices must be set before GPUs have been initialized
-            print(e)
+    for i in range(n_batches):
+        batch = filenames[i * batch_size:(i + 1) * batch_size]
+        imgs = []
+        for p in batch:
+            image = cv2.imread(p)
+            image = cv2.cvtColor(image,cv2.COLOR_BGR2RGB)
+            image = resize_keep_aspect_ratio(image,image_size,image_size)
+            if mode == 'train':
+                proba = np.random.rand()
+                if proba > 0.5:
+                    image =cv2.flip(image,1)
+            
+            imgs.append(image)
+        
+        imgs = np.array(imgs) / 127.5 - 1
+        imgs = tf.cast(imgs,tf.float32)
+        orig_labels = np.array(labels[i*batch_size:(i+1)*batch_size]).astype(np.float32)
+        target_labels = np.random.permutation(orig_labels).astype(np.float32)
+        # print(orig_labels)
+        yield imgs,orig_labels,target_labels,fix_labels[i*batch_size:(i+1)*batch_size],batch
+    
