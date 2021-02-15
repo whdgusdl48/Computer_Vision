@@ -6,7 +6,7 @@ from PIL import Image
 import random
 from functools import partial
 from utils import *
-
+from PIL import Image
 import tensorflow as tf
 from tensorflow.keras.models import Model, Sequential, load_model
 from tensorflow.keras.layers import Input,Conv2D,MaxPooling2D,ZeroPadding2D,BatchNormalization,LeakyReLU,ReLU,UpSampling2D,Reshape,Dropout,concatenate,Lambda,Multiply,Add,Flatten,Dense
@@ -69,7 +69,7 @@ class StarGAN(object):
         self.D_optimizer = tf.keras.optimizers.Adam(lr = self.d_lr,beta_1=self.beta1,beta_2 = self.beta2)
         self.G.summary()
         self.D.summary()
-        self.Image_data_class = ImageData(data_dir=self.data_dir, select_attrs=self.selected_attrs)
+        self.Image_data_class = ImageData(data_dir=self.data_dir, selected_attrs=self.selected_attrs)
         self.Image_data_class.preprocess()
 
     def residual_Block(self,input_layer,dim_out):
@@ -178,23 +178,17 @@ class StarGAN(object):
         # self.train_G = Model([real_x, org_label, trg_label], [fake_out_src, fake_out_cls, x_reconst])
         # G_loss = self.train_G.train_on_batch(x = [imgs, orig_labels, target_labels], y = [valid, target_labels, imgs])
         with tf.GradientTape() as t:
-            valid = np.ones((self.batch_size, 2, 2, 1))
-            fake =  -np.ones((self.batch_size, 2, 2, 1))
+            x_fake = self.G([x_real,labels])
+            x_recon = self.G([x_fake,labels],training=True)
+            fake_src,fake_logits = self.D(x_fake,training=True)
+            g_adv_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(fake_logits), logits=fake_logits))
+            g_cls_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=fake_logits))
+            g_rec_loss = tf.reduce_mean(tf.abs(x_real- x_recon))
 
-            x_fake = self.G([x_real,labels],training=True)
-            real_src, real_domain = self.D(x_real,training=True)
-            fake_src, fake_domain = self.D(x_fake,training=True)
-
-            src_loss = self.wasserstein_loss(real_src,fake_src)
-
-            fake_cls_loss = self.classification_loss(fake_domain,labels)
-
-            x_recon = self.G([x_fake,orig_labels],training=True)
-            rec_loss = self.reconstruction_loss(x_real,x_recon)
-            loss =  src_loss + fake_cls_loss + 10 * rec_loss
+            loss = g_adv_loss + self.lambda_class * g_cls_loss + g_rec_loss * self.lambda_gp
         grad = t.gradient(loss, self.G.trainable_variables)
         self.G_optimizer.apply_gradients(zip(grad, self.G.trainable_variables))
-        return [loss,src_loss,fake_cls_loss,rec_loss]
+        return [loss,g_adv_loss,g_cls_loss,g_rec_loss]
     # train loss
     def train_d(self,x_real,labels,orig_labels):
         # D_loss = self.train_D.train_on_batch(x = [imgs, target_labels], y = [valid, orig_labels, fake, dummy])
@@ -202,19 +196,18 @@ class StarGAN(object):
         with tf.GradientTape() as t:
             x_fake = self.G([x_real,labels],training=True)
 
-            real_src, real_domain = self.D(x_real,training=True)
+            real_src, real_domain = self.D(x_real)
             fake_src, fake_domain = self.D(x_fake,training=True)
-            
-            src_loss = self.wasserstein_loss(real_src,fake_src)
-
-            real_cls_loss = self.classification_loss(real_domain,orig_labels)
-            fake_cls_loss = self.classification_loss(fake_domain,labels)
-            
             gp = self.gradient_penalty(partial(self.D,training=True),x_real,x_fake) 
-            loss = -src_loss + real_cls_loss + 10 * gp
+            real_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(real_src), logits=real_src))
+            fake_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(fake_src), logits=fake_src))
+            d_adv_loss = real_loss - fake_loss + gp * self.lambda_gp
+            d_cls_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=real_domain))
+
+            loss = d_adv_loss + self.lambda_class * d_cls_loss
         grad = t.gradient(loss,self.D.trainable_variables)
         self.D_optimizer.apply_gradients(zip(grad,self.D.trainable_variables))
-        return [loss,src_loss,real_cls_loss,gp]
+        return [loss,d_adv_loss,d_cls_loss,gp]
 
     def train(self):
         data_iter = get_loader(self.Image_data_class.train_dataset, self.Image_data_class.train_dataset_label, self.Image_data_class.train_dataset_fix_label, 
@@ -223,22 +216,22 @@ class StarGAN(object):
         for epoch in range(self.num_iters):
             imgs,orig_labels,target_labels,fix_labels, _ = next(data_iter)
 
-            G_loss = self.train_g(imgs,target_labels,orig_labels)
+            D_loss = self.train_d(imgs,target_labels,orig_labels)
 
             if (epoch + 1) % self.n_critic == 0:
-                D_loss = self.train_d(imgs,target_labels,orig_labels)
+                G_loss = self.train_g(imgs,target_labels,orig_labels)
             
             if (epoch + 1) % self.log_step == 0:
                 print(f"Iteration: [{epoch + 1}/{self.num_iters}]")
-                print(f"\tD/_loss = [{D_loss[1]:.4f}], D/loss_cls =  [{D_loss[2]:.4f}], D/loss_gp = [{D_loss[-1]:.4f}]")
-                print(f"\tG/loss_fake = [{G_loss[1]:.4f}], G/loss_rec = [{G_loss[3]:.4f}], G/loss_cls = [{G_loss[2]:.4f}]") 
+                print(f"\tD/adv_loss = [{D_loss[1]:.4f}], D/loss_cls =  [{D_loss[2]:.4f}], D/loss_gp = [{D_loss[-1]:.4f}]")
+                print(f"\tG/adv_loss = [{G_loss[1]:.4f}], G/loss_rec = [{G_loss[3]:.4f}], G/loss_cls = [{G_loss[2]:.4f}]") 
             
             if (epoch + 1) % self.model_save_step == 0:  
                 self.G.save_weights(os.path.join(self.model_save_dir, 'G_weights.hdf5'))
                 self.D.save_weights(os.path.join(self.model_save_dir, 'D_weights.hdf5'))
-                self.train_D.save_weights(os.path.join(self.model_save_dir, 'train_D_weights.hdf5'))
-                self.train_G.save_weights(os.path.join(self.model_save_dir, 'train_G_weights.hdf5')) 
-
+                self.D.save_weights(os.path.join(self.model_save_dir, 'train_D_weights.hdf5'))
+                self.G.save_weights(os.path.join(self.model_save_dir, 'train_G_weights.hdf5')) 
+    
     def test(self):
         G_weights_dir = os.path.join(self.model_save_dir, 'G_weights.hdf5')
         if not os.path.isfile(G_weights_dir):
@@ -248,11 +241,12 @@ class StarGAN(object):
 
         data_iter = get_loader(self.Image_data_class.test_dataset, self.Image_data_class.test_dataset_label, self.Image_data_class.test_dataset_fix_label, 
                                image_size=self.image_size, batch_size=self.batch_size, mode=self.mode)        
-        n_batches = int(len(self.sample_step) / self.batch_size)
+        n_batches = int(self.sample_step / self.batch_size)
         total_samples = n_batches * self.batch_size
 
         for i in range(n_batches):
             imgs, orig_labels, target_labels, fix_labels, names = next(data_iter)
+            print(orig_labels,target_labels)
             for j in range(self.batch_size):
                 preds = self.G.predict([np.repeat(np.expand_dims(imgs[j], axis = 0), len(self.selected_attrs), axis = 0), fix_labels[j]])
                 for k in range(len(self.selected_attrs)):                    
