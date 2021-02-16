@@ -26,6 +26,7 @@
 11. DISCO GAN => edges2shoes 128*128
 12. PG-GAN => ImageGenerating... 4*4 => 512*512
 13. SAGAN => ImageGenerating... FFHQ Face Data set 128,128
+14. SRGAN => Super Resolution GAN .... div2K dataset 4 upscaling
 ----------------------------------
 
 # Reading analysis GAN
