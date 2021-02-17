@@ -27,10 +27,10 @@
 12. PG-GAN => ImageGenerating... 4*4 => 512*512
 13. SAGAN => ImageGenerating... FFHQ Face Data set 128,128
 14. SRGAN => Super Resolution GAN .... div2K dataset 4 upscaling
+15. STARGAN => Learning
 ----------------------------------
 
 # Reading analysis GAN
 
-14. STAR GAN
-15. style GAN
+16. style GAN
 
