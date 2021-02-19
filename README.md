@@ -30,7 +30,7 @@
 15. STARGAN => Learning
 ----------------------------------
 
-# Reading analysis GAN
-
-16. style GAN
+# Object Detection
+-----------------------------------
+1. Selective Search
 
