@@ -35,33 +35,39 @@ ap.add_argument("-v", "--visualize", type=int, default=-1,
                 help="whether or not to show extra visualizations for debugging")
 args = vars(ap.parse_args())
 
-WIDTH = 600
+# 이미지 사이즈와 피라미드 스케일 조정 및 윈도우 스텝 할당
+WIDTH = 800
 PYR_SCALE = 1.5
-WIN_STEP = 16
+WIN_STEP = 10
 ROI_SIZE = eval(args["size"])
+# ResNet 윈도우 크기 지정
 INPUT_SIZE = (224,224)
 
+# 모델 호출
 print("[INFO] ResNet50 네트워크를 호출합니다.")
 model = ResNet50(weights="imagenet", include_top=True)
 
+# 이미지 불러온 뒤 이미지 사이즈에 맞게 조정
 orig = cv2.imread(args["image"])
-orig = cv2.resize(orig,(500,500))
+
 orig = imutils.resize(orig, width=WIDTH)
 (H, W) = orig.shape[:2]
 
+# 이미지 피라미드 조정
 pyramid = image_pyramid(orig, scale=PYR_SCALE, minSize=ROI_SIZE)
 
+# rois를 할당하기 위한 배열 선언
 rois = []
 locs = []
 
 start = time.time()
 
 for image in pyramid:
-
+    # 이미지 피라미드 진행
     scale = W / float(image.shape[1])
 
     for (x,y,roiOrig) in sliding_window(image,WIN_STEP,ROI_SIZE):
-
+        # Roi 추출하여 모델에 넣고 Classification 추
         x = int(x * scale)
         y = int(y * scale)
         w = int(ROI_SIZE[0] * scale)
@@ -98,7 +104,7 @@ print("[INFO] RoI 분류시간 {:.5f} seconds".format(
 
 preds = imagenet_utils.decode_predictions(preds, top=1)
 labels = {}
-
+# 이미지 라벨을 decode_prediction을 통해서 추출한다.
 for (i, p) in enumerate(preds):
 
     (imagenetID, label, prob) = p[0]
@@ -108,7 +114,10 @@ for (i, p) in enumerate(preds):
         L = labels.get(label, [])
         L.append((box, prob))
         labels[label] = L
+
+
 print(labels)
+
 for label in labels.keys():
 
     print('결과 출력중...',label)
