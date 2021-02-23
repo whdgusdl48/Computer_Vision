@@ -29,43 +29,43 @@ args = vars(ap.parse_args())
 
 filetype = mimetypes.guess_type(args["input"])[0]
 imagePaths = [args["input"]]
-# if the file type is a text file, then we need to process *multiple*
-# images
+
+# 훈련된 모델을 바탕으로 Detection을 진행하기 위해 test 텍스트 파일 호출
 if "text/plain" == filetype:
     # load the image paths in our testing file
     imagePaths = open(args["input"]).read().strip().split("\n")
     print(imagePaths)
 
-print("[INFO] loading object detector...")
+# 모델 호출
+print("[INFO] 모델을 불러옵니다..")
 model = load_model(config.MODEL_PATH)
 lb = pickle.loads(open(config.LB_PATH, "rb").read())
 
+
 for imagePath in imagePaths:
-    # load the input image (in Keras format) from disk and preprocess
-    # it, scaling the pixel intensities to the range [0, 1]
+
+    # 텍스트 파일에 있는 경로를 통해서 한줄씩 읽어와서 224,224로 정제화
     image = load_img(imagePath, target_size=(224, 224))
     image = img_to_array(image) / 255.0
     image = np.expand_dims(image, axis=0)
-    # predict the bounding box of the object along with the class
-    # label
+    # 훈련된 모델을 바탕으로 출력값 도출
     (boxPreds, labelPreds) = model.predict(image)
     (startX, startY, endX, endY) = boxPreds[0]
-    # determine the class label with the largest predictedq
-    # probability
+    # 클래스 값을 np.argmax를 통해서 가장 근접한 클래스 도출
     i = np.argmax(labelPreds, axis=1)
     label = lb.classes_[i][0]
 
+    # 이미지 읽어온다.
     image = cv2.imread(imagePath)
     image = imutils.resize(image, width=600)
     (h, w) = image.shape[:2]
     print(h,w)
-    # scale the predicted bounding box coordinates based on the image
-    # dimensions
+    # 이미지를 높이 600으로 변한
     startX = int(startX * w)
     startY = int(startY * h)
     endX = int(endX * w)
     endY = int(endY * h)
-    # draw the predicted bounding box and class label on the image
+    # 이미지 박스와 라벨 붙이기
     y = startY - 10 if startY - 10 > 10 else startY + 10
     cv2.putText(image, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX,
                 0.65, (0, 255, 0), 2)

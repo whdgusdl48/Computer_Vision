@@ -68,25 +68,33 @@ for i,annot in enumerate(annots_list):
         #     cv2.waitKey(0)
         #     cv2.destroyAllWindows()
 
+        # 이미지 크기 불러온다.
         (h, w) = image.shape[:2]
+        # 0 ~ 1 실수화 과정
         startX = float(startX) / w
         startY = float(startY) / h
         endX = float(endX) / w
         endY = float(endY) / h
 
+        # 이미지 불러오기
         image = load_img(imagePath, target_size=(224, 224))
 
+        # 이미지 배열화
         image = img_to_array(image)
+
+        # 신경망을 넣을 데이터 (이미지, 라벨, 박스 위치, 이미지 경로)
         data.append(image)
         labels.append(label)
         bboxes.append((startX, startY, endX, endY))
         imagePaths.append(imagePath)
 
+# 데이터 0~1 사이로 정제
 data = np.array(data,dtype=np.float32) / 255.0
 labels = np.array(labels)
 bboxes = np.array(bboxes, dtype="float32")
 imagePaths = np.array(imagePaths)
 
+# 라벨 원핫 인코딩 과정 진행
 lb = LabelBinarizer()
 labels = lb.fit_transform(labels)
 
@@ -94,19 +102,23 @@ if len(lb.classes_) == 2:
     labels = to_categorical(labels)
 
 print(labels.shape)
+# 훈련 데이터와 테스트 데이터를 나눠줌 4대1비율로
 split = train_test_split(data, labels, bboxes, imagePaths,
                          test_size=0.20, random_state=42)
 
+# target과 x 데이터를 분리한다.
 (trainImages, testImages) = split[:2]
 (trainLabels, testLabels) = split[2:4]
 (trainBBoxes, testBBoxes) = split[4:6]
 (trainPaths, testPaths) = split[6:]
 
+# 이미지를 판별할 데이터를 넣어준다. txt파일 읽어오기를 통해서 판별할 예정
 print("[INFO] 테스트를 실행할 이미지 경로를 저장합니다....")
 f = open(config.TEST_PATH, "w")
 f.write("\n".join(testPaths))
 f.close()
 
+# 기존 학습된 신경망 VGG 19를 통해서 224,224,3 형태의 VGG를 넣어준다.
 vgg = VGG19(weights='imagenet', include_top= False,
             input_tensor= Input(shape=(224,224,3)))
 vgg.trainable = False
@@ -129,6 +141,7 @@ classification = Dense(len(lb.classes_), activation='softmax', name='class_label
 
 model = Model(inputs= vgg.input, outputs=[boxhead, classification])
 
+# 클래스는 크로스엔트로비 박스 추출 값은 MSE를 통해서 손실함수 정의
 losses = {
     "class_label" : 'categorical_crossentropy',
     "bounding_box" : 'mean_squared_error'
@@ -147,8 +160,7 @@ trainTargets = {
     "class_label": trainLabels,
     "bounding_box": trainBBoxes
 }
-# construct a second dictionary, this one for our target testing
-# outputs
+# 출력 모델이 2개의 값을 가지기 때문에 2개를 정의
 testTargets = {
     "class_label": testLabels,
     "bounding_box": testBBoxes
@@ -161,10 +173,10 @@ H = model.fit(
     batch_size=config.BATCH_SIZE,
     epochs=config.NUM_EPOCHS,
     verbose=1)
-# serialize the model to disk
+# 모델 저장
 print("[INFO] saving object detector model...")
 model.save(config.MODEL_PATH, save_format="h5")
-# serialize the label binarizer to disk
+# 라벨 값 저장
 print("[INFO] saving label binarizer...")
 f = open(config.LB_PATH, "wb")
 f.write(pickle.dumps(lb))
@@ -174,9 +186,9 @@ lossNames = ["loss", "class_label_loss", "bounding_box_loss"]
 N = np.arange(0, config.NUM_EPOCHS)
 plt.style.use("ggplot")
 (fig, ax) = plt.subplots(3, 1, figsize=(13, 13))
-# loop over the loss names
+# 손실 시각화
 for (i, l) in enumerate(lossNames):
-    # plot the loss for both the training and validation data
+
     title = "Loss for {}".format(l) if l != "loss" else "Total loss"
     ax[i].set_title(title)
     ax[i].set_xlabel("Epoch #")
@@ -184,7 +196,7 @@ for (i, l) in enumerate(lossNames):
     ax[i].plot(N, H.history[l], label=l)
     ax[i].plot(N, H.history["val_" + l], label="val_" + l)
     ax[i].legend()
-# save the losses figure and create a new figure for the accuracies
+# 정확성 저장
 plt.tight_layout()
 plotPath = os.path.sep.join([config.PLOT_PATH, "losses.png"])
 plt.savefig(plotPath)
@@ -200,6 +212,5 @@ plt.title("Class Label Accuracy")
 plt.xlabel("Epoch #")
 plt.ylabel("Accuracy")
 plt.legend(loc="lower left")
-# save the accuracies plot
 plotPath = os.path.sep.join([config.PLOT_PATH, "accs.png"])
 plt.savefig(plotPath)
